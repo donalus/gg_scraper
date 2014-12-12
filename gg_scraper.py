@@ -1,4 +1,4 @@
-#!/usr/bin/python3
+#!/usr/bin/python
 # -*- coding: utf-8 -*-
 """
 Download a Google Group to MBOX
@@ -54,11 +54,15 @@ MANGLED_ADDR_RE = re.compile(
     r'([a-zA-Z0-9_.+-]+(\.)+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)',
     re.IGNORECASE)
 
-__version__ = '0.8'
+__version__ = '0.9.0'
 
 pyver = sys.version_info
 py26 = pyver[:2] < (2, 7)
 py3k = pyver[0] == 3
+
+
+class BadURLError(ValueError):
+    pass
 
 
 class Page(object):
@@ -172,14 +176,18 @@ class Topic(Page):
 
 
 class Group(Page):
+    GOOD_URL_RE = re.compile(r'https://groups.google.com/forum/#!forum/(.+)')
+
     def __init__(self, URL):
         super(Group, self).__init__()
         self.group_URL = URL
         self.topics = []
-        match = re.match(r'https://groups.google.com/forum/#!forum/(.+)',
-                         URL)
-        if match is not None:
-            self.name = match.group(1)
+        match = self.GOOD_URL_RE.match(URL)
+        logging.debug('match = %s', match)
+        if match is None:
+            raise BadURLError("Required URL in form 'https://groups.google.com/forum/#!forum/GROUPNAME'")
+
+        self.name = match.group(1)
 
     @staticmethod
     def get_count_topics(BS):
@@ -305,10 +313,7 @@ class MBOX(mailbox.mbox):
         self.lock()
         for mbx_str in group_object.all_messages():
             try:
-                if not py26:
-                    self.add(mbx_str.encode())
-                else:
-                    self.add(mbx_str.encode('utf8'))
+                self.add(mbx_str.encode('utf8'))
             except UnicodeDecodeError:
                 logging.warning('mbx_str = type {0}'.format(type(mbx_str)))
         self.unlock()

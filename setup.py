@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import absolute_import, print_function, unicode_literals
 import sys
-from distutils.core import setup, Command
+from setuptools import setup
 import io
 try:
     import unittest2 as unittest
@@ -9,26 +9,6 @@ except ImportError:
     import unittest
 
 import gg_scraper
-
-
-class RunTests(Command):
-    """New setup.py command to run all tests for the package.
-    """
-    description = "run all tests for the package"
-
-    user_options = []
-
-    def initialize_options(self):
-        pass
-
-    def finalize_options(self):
-        pass
-
-    def run(self):
-        tests = unittest.TestLoader().discover('test')
-        runner = unittest.TextTestRunner(verbosity=2)
-        res = runner.run(tests)
-        sys.exit(int(not res.wasSuccessful()))
 
 
 classifiers = [
@@ -58,7 +38,6 @@ setup(name='gg_scraper',
       keywords=['email', 'Google Groups', 'scrap', 'backup'],
       license='GNU GPL',
       classifiers=classifiers,
-      cmdclass={
-          'test': RunTests,
-      },
-      requires=['beautifulsoup4', 'PyYAML'])
+      test_suite="test",
+      requires=['beautifulsoup4', 'PyYAML']
+)

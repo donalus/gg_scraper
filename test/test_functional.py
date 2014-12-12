@@ -10,6 +10,7 @@ except ImportError:
 import gg_scraper
 
 IN_URL = 'https://groups.google.com/forum/#!forum/jbrout'
+BAD_URL = "http://groups.google.com/group/rdflib-dev"
 ORIG_URL = 'http://groups.google.com/d/forum/jbrout'
 EXP_URL = 'https://groups.google.com/forum/' + \
     '?_escaped_fragment_=forum/jbrout'
@@ -49,6 +50,10 @@ class TestGGScrapperFunctional(unittest.TestCase):
         articles = topic.get_articles()
         article_count = topic.get_count_articles()
         self.assertEqual(len(articles), article_count)
+
+    def test_wrong_URL(self):
+        with self.assertRaises(gg_scraper.BadURLError):
+            gg_scraper.Group(BAD_URL)
 
     def test_get_raw_article(self):
         self.maxDiff = None
