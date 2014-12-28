@@ -54,7 +54,7 @@ MANGLED_ADDR_RE = re.compile(
     r'([a-zA-Z0-9_.+-]+(\.)+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)',
     re.IGNORECASE)
 
-__version__ = '0.9.0'
+__version__ = '0.10.0'
 
 pyver = sys.version_info
 py26 = pyver[:2] < (2, 7)
