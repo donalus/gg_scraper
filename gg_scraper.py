@@ -39,15 +39,15 @@ import yaml
 try:
     from urllib.error import HTTPError
     from urllib.request import HTTPHandler, HTTPRedirectHandler, \
-        build_opener
+        build_opener, URLError
 except ImportError:
     from urllib2 import (HTTPError, HTTPHandler, HTTPRedirectHandler,
-                         build_opener)
+                         build_opener, URLError)
 #from concurrent.futures import ProcessPoolExecutor
 from bs4 import BeautifulSoup
 import logging
-logging.basicConfig(format='%(levelname)s:%(funcName)s:%(message)s',
-                    level=logging.DEBUG)
+
+logger = logging.getLogger('gg_scraper')
 
 ADDR_SEC_LABEL = 'addresses'
 MANGLED_ADDR_RE = re.compile(
@@ -60,14 +60,13 @@ pyver = sys.version_info
 py26 = pyver[:2] < (2, 7)
 py3k = pyver[0] == 3
 
-
 class BadURLError(ValueError):
     pass
 
 
 class Page(object):
     verb_handler = HTTPHandler()
-    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+    if logger.getEffectiveLevel() == logging.DEBUG:
         verb_handler.set_http_debuglevel(2)
     redir_handler = HTTPRedirectHandler()
     opener = build_opener(verb_handler, redir_handler)
@@ -97,10 +96,15 @@ class Page(object):
             return old_URL
 
     def _get_page_BS(self, URL):
-        res = self.opener.open(self.unenscape_Google_bang_URL(URL))
-        in_str = res.read()
-        bs = BeautifulSoup(in_str)
-        res.close()
+        bs = None
+        try:
+            res = self.opener.open(self.unenscape_Google_bang_URL(URL))
+            in_str = res.read()
+            bs = BeautifulSoup(in_str)
+            res.close()
+        except HTTPError as exc:
+            logger.warning('Exception on downloading: {0}\n{1}'.format(
+                self.root, exc))
         return bs
 
 
@@ -111,7 +115,7 @@ class Article(Page):
         self.raw_message = ''
 
     def collect_message(self):
-        logging.debug('self.root = {0}'.format(self.root))
+        logger.debug('self.root = {0}'.format(self.root))
         result = None
         try:
             res = self.opener.open(self.root)
@@ -129,8 +133,8 @@ class Article(Page):
             if not py3k:
                 result = result.decode('utf8')
             res.close()
-        except HTTPError as exc:
-            logging.warning('Exception on downloading {0}:\n{1}'.format(
+        except (HTTPError, URLError) as exc:
+            logger.warning('Exception on downloading {0}:\n{1}'.format(
                 self.root, exc))
 
         return result
@@ -165,12 +169,13 @@ class Topic(Page):
     def get_articles(self):
         out = []
         page = self._get_page_BS(self.root)
-        for a_elem in page.find_all('a'):
-            if 'href' in a_elem.attrs:
-                a_href = a_elem['href']
-                if re.match(r'https://groups.google.com/d/msg/',
-                            a_href) is not None:
-                    out.append(Article(a_href))
+        if page <> None:
+            for a_elem in page.find_all('a'):
+                if 'href' in a_elem.attrs:
+                    a_href = a_elem['href']
+                    if re.match(r'https://groups.google.com/d/msg/',
+                                a_href) is not None:
+                        out.append(Article(a_href))
 
         return out
 
@@ -183,7 +188,7 @@ class Group(Page):
         self.group_URL = URL
         self.topics = []
         match = self.GOOD_URL_RE.match(URL)
-        logging.debug('match = %s', match)
+        logger.debug('match = %s', match)
         if match is None:
             raise BadURLError("Required URL in form 'https://groups.google.com/forum/#!forum/GROUPNAME'")
 
@@ -212,7 +217,7 @@ class Group(Page):
             # filter out all-non-topic <a>s
             return True, Topic(elem['href'], elem['title'])
         else:
-            logging.debug('other = %s', elem)
+            logger.debug('other = %s', elem)
             return False, elem
 
     def get_topics(self):
@@ -249,9 +254,7 @@ class Group(Page):
         self.topics = self.get_topics()
         len_topics = len(self.topics)
         for top in self.topics:
-            #print('[%d/%d] downloading "%s"' % (self.topics.index(top),
-            #      len_topics, top.name))
-            print('[%d/%d] downloading' % (self.topics.index(top), len_topics))
+            logger.info('[%d/%d] downloading' % (self.topics.index(top), len_topics))
             arts = top.get_articles()
             top.articles = arts
             for a in arts:
@@ -293,7 +296,7 @@ class Group(Page):
                     cnf_p.set(ADDR_SEC_LABEL, addr, '')
                 except TypeError:
                     # Failed with addr = ('richte...@gmail.com', '.')
-                    logging.info('Failed with addr = {0}'.format(addr))
+                    logger.info('Failed with addr = {0}'.format(addr))
                     raise
             cnf_p.write(cnf_f)
 
@@ -308,14 +311,13 @@ class MBOX(mailbox.mbox):
         lockfile = '{0}.lock'.format(filename)
         if os.path.exists(lockfile):
             os.unlink(lockfile)
-
     def write_group(self, group_object):
         self.lock()
         for mbx_str in group_object.all_messages():
             try:
                 self.add(mbx_str.encode('utf8'))
             except UnicodeDecodeError:
-                logging.warning('mbx_str = type {0}'.format(type(mbx_str)))
+                logger.warning('mbx_str = type {0}'.format(type(mbx_str)))
         self.unlock()
         self.close()
 
@@ -324,9 +326,9 @@ def main(group_URL):
     # Collect all messages to the internal variables
     if os.path.exists('group.yaml'):
         with open('group.yaml') as yf:
-            logging.debug('Loading state from group.yaml')
+            logger.debug('Loading state from group.yaml')
             grp = yaml.load(yf)
-            logging.debug('Done')
+            logger.debug('Done')
     else:
         grp = Group(group_URL)
         grp.collect_group()
@@ -379,7 +381,37 @@ def demangle(correct_list, orig_mbx, out_mbx):
             out_mbx.add(msg)
     out_mbx.close()
     in_mbx.close()
-    logging.info('Change counter = {0}'.format(counter))
+    logger.info('Change counter = {0}'.format(counter))
+
+def initLogging(args):
+    l = logging.getLogger('gg_scraper')
+    formatter = logging.Formatter('%(levelname)s:%(funcName)s:%(message)s')
+
+    log_level = logging.DEBUG
+    if args.log_level is not None:
+        if args.log_level == 'INFO':
+            log_level = logging.INFO
+        elif args.log_level == 'WARNING':
+            log_level = logging.WARNING
+        elif args.log_level == 'ERROR':
+            log_level = logging.ERROR
+        else:
+            log_level = logging.DEBUG
+
+    sh = logging.StreamHandler()
+    sh.setFormatter(formatter)
+    sh.setLevel(logging.INFO)
+    l.addHandler(sh)
+
+    if args.log_file is not None:
+        if os.path.exists(args.log_file):
+            l.error('%s exists. Could not create log file.' % args.log_file)
+        else:
+            fh = logging.FileHandler(args.log_file)
+            fh.setFormatter(formatter)
+            l.addHandler(fh)
+
+    return l
 
 
 if __name__ == '__main__':
@@ -387,15 +419,25 @@ if __name__ == '__main__':
                                      'Scrape a Google Groups group.')
     parser.add_argument('group', metavar='URL', nargs='?',
                         help='URL of the group')
-    parser.add_argument('-d', '--demangle', metavar='DEMANGLE_FILE', nargs=3,
+    parser.add_argument('-d', '--demangle', metavar=('DEMANGLE_FILE',
+                        'IN_MBOX', 'OUT_MBOX'), nargs=3,
                         help='Demangle mbox from stdin to stdout' +
                         'according to the values in the configuration' +
                         'file.')
+    parser.add_argument('--log-file', metavar='LOG_FILE', nargs='?',
+                        help='Log debug output to file')
+    parser.add_argument('--log-level', metavar='LOG_LEVEL', nargs='?',
+                        help='Logging level (DEBUG|WARNING|ERROR)')
+
     args = parser.parse_args()
 
-    logging.debug('args = {0}'.format(args))
+    logger = initLogging(args)
+
+    logger.debug('args = {0}'.format(args))
 
     if args.demangle is not None:
         demangle(args.demangle[0], args.demangle[1], args.demangle[2])
-    else:
+    elif args.group is not None:
         main(args.group)
+    else:
+        parser.print_help()
